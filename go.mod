@@ -6,12 +6,12 @@ require (
 	github.com/cucumber/godog v0.15.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/slidebolt/sb-contract v1.0.0
-	github.com/slidebolt/sb-domain v1.0.0
-	github.com/slidebolt/sb-testkit v1.0.0
-	github.com/slidebolt/sb-messenger-sdk v1.0.0
-	github.com/slidebolt/sb-runtime v1.0.0
-	github.com/slidebolt/sb-storage-sdk v1.0.0
+	github.com/slidebolt/sb-contract v1.0.2
+	github.com/slidebolt/sb-domain v1.0.2
+	github.com/slidebolt/sb-messenger-sdk v1.0.2
+	github.com/slidebolt/sb-runtime v1.0.2
+	github.com/slidebolt/sb-storage-sdk v1.0.2
+	github.com/slidebolt/sb-testkit v1.0.2
 )
 
 require (
@@ -58,8 +58,10 @@ require (
 	github.com/nats-io/nats.go v1.49.0 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	github.com/slidebolt/sb-storage-server v1.0.0 // indirect
+	github.com/slidebolt/sb-script v1.0.2 // indirect
+	github.com/slidebolt/sb-storage-server v1.0.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.etcd.io/bbolt v1.4.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/mod v0.18.0 // indirect

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	managersdk "github.com/slidebolt/sb-manager-sdk"
+	testkit "github.com/slidebolt/sb-testkit"
 
 	domain "github.com/slidebolt/sb-domain"
 	messenger "github.com/slidebolt/sb-messenger-sdk"
@@ -28,7 +28,7 @@ import (
 // app, and returns everything needed to drive tests.
 type multiEnv struct {
 	t     *testing.T
-	env   *managersdk.TestEnv
+	env   *testkit.TestEnv
 	store storage.Storage
 	app   *app.App
 	port  string
@@ -37,7 +37,7 @@ type multiEnv struct {
 func newMultiEnv(t *testing.T) *multiEnv {
 	t.Helper()
 
-	env := managersdk.NewTestEnv(t)
+	env := testkit.NewTestEnv(t)
 	env.Start("messenger")
 	env.Start("storage")
 

@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	domain "github.com/slidebolt/sb-domain"
-	managersdk "github.com/slidebolt/sb-manager-sdk"
+	testkit "github.com/slidebolt/sb-testkit"
 )
 
 func TestStorageContract_HomeAssistantLabelMergesFromProfile(t *testing.T) {
-	env := managersdk.NewTestEnv(t)
+	env := testkit.NewTestEnv(t)
 	env.Start("messenger")
 	env.Start("storage")
 	store := env.Storage()

@@ -6,14 +6,14 @@
 //
 // Run with:
 //
-//	HA_URL=http://localhost:38123 HA_TOKEN=<token> \
+//	HA_URL=http://localhost:38123 HA_LONG_LIVED_ACCESS_TOKEN=<token> \
 //	  go test -tags integration -v -count=1 -timeout 60s \
 //	  ./plugin-homeassistant/cmd/plugin-homeassistant/
 //
 // Environment variables:
 //
-//	HA_URL    Base URL of Home Assistant (default: http://localhost:8123)
-//	HA_TOKEN  Long-lived HA access token (required for API calls)
+//	HA_URL                     Base URL of Home Assistant (default: http://localhost:8123)
+//	HA_LONG_LIVED_ACCESS_TOKEN Home Assistant long-lived access token (required for API calls)
 package main
 
 import (
@@ -41,8 +41,8 @@ func haBaseURL() string {
 	return "http://localhost:38123"
 }
 
-func haToken() string {
-	return os.Getenv("HA_TOKEN")
+func haLongLivedAccessToken() string {
+	return os.Getenv("HA_LONG_LIVED_ACCESS_TOKEN")
 }
 
 func skipIfHADown(t *testing.T) {
@@ -57,7 +57,7 @@ func skipIfHADown(t *testing.T) {
 func haGET(t *testing.T, path string) (int, map[string]any) {
 	t.Helper()
 	req, _ := http.NewRequest("GET", haBaseURL()+path, nil)
-	if tok := haToken(); tok != "" {
+	if tok := haLongLivedAccessToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -76,7 +76,7 @@ func haPOST(t *testing.T, path string, body map[string]any) int {
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", haBaseURL()+path, bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
-	if tok := haToken(); tok != "" {
+	if tok := haLongLivedAccessToken(); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := http.DefaultClient.Do(req)
@@ -108,7 +108,7 @@ func waitForHAState(t *testing.T, entityID string, timeout time.Duration, predic
 // the server. Caller must defer srv.Stop().
 func startServerWithEntities(t *testing.T, entities ...domain.Entity) app.ServerRunner {
 	t.Helper()
-	srv := app.NewServerForTest(app.Config{Port: "39444", Token: "", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"}, entities...)
+	srv := app.NewServerForTest(app.Config{Port: "39444", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"}, entities...)
 	port, err := srv.Start()
 	if err != nil {
 		t.Fatalf("start server: %v", err)
@@ -158,7 +158,7 @@ func testHAID(typ, id string) string {
 func TestIntegration_HAConnectsOnStartup(t *testing.T) {
 	skipIfHADown(t)
 
-	srv := app.NewServerForTest(app.Config{Port: "39444", Token: "", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"})
+	srv := app.NewServerForTest(app.Config{Port: "39444", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"})
 	port, err := srv.Start()
 	if err != nil {
 		t.Fatalf("start server: %v", err)
@@ -179,8 +179,8 @@ func TestIntegration_HAConnectsOnStartup(t *testing.T) {
 // with correct state fields.
 func TestIntegration_SnapshotEntitiesReachHA(t *testing.T) {
 	skipIfHADown(t)
-	if haToken() == "" {
-		t.Skip("HA_TOKEN not set — required to query HA REST API")
+	if haLongLivedAccessToken() == "" {
+		t.Skip("HA_LONG_LIVED_ACCESS_TOKEN not set — required to query HA REST API")
 	}
 
 	entities := []domain.Entity{
@@ -238,8 +238,8 @@ func TestIntegration_SnapshotEntitiesReachHA(t *testing.T) {
 // plugin receives and applies the command by querying HA state afterward.
 func TestIntegration_CommandRoundTrip(t *testing.T) {
 	skipIfHADown(t)
-	if haToken() == "" {
-		t.Skip("HA_TOKEN not set — required to call HA services")
+	if haLongLivedAccessToken() == "" {
+		t.Skip("HA_LONG_LIVED_ACCESS_TOKEN not set — required to call HA services")
 	}
 
 	entities := []domain.Entity{
@@ -332,8 +332,8 @@ func allTestEntities() []domain.Entity {
 // and verifies each one appears in HA with correct state.
 func TestIntegration_AllEntitySnapshots(t *testing.T) {
 	skipIfHADown(t)
-	if haToken() == "" {
-		t.Skip("HA_TOKEN not set")
+	if haLongLivedAccessToken() == "" {
+		t.Skip("HA_LONG_LIVED_ACCESS_TOKEN not set")
 	}
 
 	entities := allTestEntities()
@@ -540,8 +540,8 @@ func TestIntegration_AllEntitySnapshots(t *testing.T) {
 // and verifies commands are received and state updates flow back to HA.
 func TestIntegration_AllEntityCommands(t *testing.T) {
 	skipIfHADown(t)
-	if haToken() == "" {
-		t.Skip("HA_TOKEN not set")
+	if haLongLivedAccessToken() == "" {
+		t.Skip("HA_LONG_LIVED_ACCESS_TOKEN not set")
 	}
 
 	entities := allTestEntities()

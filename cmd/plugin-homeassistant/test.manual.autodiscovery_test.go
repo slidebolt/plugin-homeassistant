@@ -18,7 +18,7 @@ import (
 )
 
 func TestManual_AutoDiscovery(t *testing.T) {
-	srv := app.NewServerForTest(app.Config{Port: "0", Token: "", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"})
+	srv := app.NewServerForTest(app.Config{Port: "0", SystemUUID: "test-uuid", SystemMAC: "E0:00:00:00:00:FF"})
 	port, err := srv.Start()
 	if err != nil {
 		t.Fatalf("start server: %v", err)

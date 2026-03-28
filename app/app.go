@@ -77,6 +77,21 @@ func (a *App) OnStart(deps map[string]json.RawMessage) (json.RawMessage, error) 
 		return nil, fmt.Errorf("start server: %w", err)
 	}
 
+	// haFingerprint returns a JSON string of the entity's Home Assistant wire
+	// representation, but with the dynamic state field zeroed out. This
+	// captures changes to configuration (names, labels, supported features,
+	// units) while ignoring simple state updates.
+	haFingerprint := func(data json.RawMessage) string {
+		var entity domain.Entity
+		if err := json.Unmarshal(data, &entity); err != nil {
+			return ""
+		}
+		we := entityToWire(entity)
+		we.State = nil // Ignore dynamic state for the fingerprint
+		b, _ := json.Marshal(we)
+		return string(b)
+	}
+
 	// Watch for entities labeled PluginHomeassistant across all plugins.
 	labelQuery := storage.Query{
 		Where: []storage.Filter{{Field: "labels.PluginHomeassistant", Op: storage.Exists}},
@@ -100,17 +115,45 @@ func (a *App) OnStart(deps map[string]json.RawMessage) (json.RawMessage, error) 
 			a.srv.Broadcast(wireMessage{Type: "entity_removed", Entity: &we})
 			log.Printf("plugin-homeassistant: entity removed %s", key)
 		},
-		OnUpdate: func(key string, data json.RawMessage) {
+		OnCapabilityUpdate: func(key string, data json.RawMessage) {
 			var entity domain.Entity
 			if err := json.Unmarshal(data, &entity); err != nil {
 				return
 			}
+			// Configuration changed (names, units, features, etc).
+			// Signal HA to re-discover the entity by broadcasting entity_added.
+			we := entityToWire(entity)
+			a.srv.Broadcast(wireMessage{Type: "entity_added", Entity: &we})
+			log.Printf("plugin-homeassistant: entity configuration updated %s", key)
+		},
+		OnStateUpdate: func(key string, data json.RawMessage) {
+			var entity domain.Entity
+			if err := json.Unmarshal(data, &entity); err != nil {
+				return
+			}
+			// Only state changed. Standard update.
 			we := entityToWire(entity)
 			a.srv.Broadcast(wireMessage{Type: "entity_updated", Entity: &we})
 		},
+		Fingerprint: haFingerprint,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("watch labeled entities: %w", err)
+	}
+
+	// Populate the watcher with pre-existing entities and send initial discovery.
+	entries, err := store.Query(labelQuery)
+	if err != nil {
+		return nil, fmt.Errorf("initial entity query: %w", err)
+	}
+	for _, entry := range entries {
+		var entity domain.Entity
+		if err := json.Unmarshal(entry.Data, &entity); err != nil {
+			continue
+		}
+		a.watch.Populate(entry.Key, entry.Data)
+		we := entityToWire(entity)
+		a.srv.Broadcast(wireMessage{Type: "entity_added", Entity: &we})
 	}
 
 	log.Printf("plugin-homeassistant: started on port %d, advertising via mDNS", port)

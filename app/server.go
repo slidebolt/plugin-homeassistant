@@ -22,11 +22,12 @@ import (
 // --- Wire types (mirror the mock server protocol exactly) ---
 
 type wireMessage struct {
-	Type     string         `json:"type"`
-	Auth     *bool          `json:"auth,omitempty"`
-	Snapshot *wireSnapshot  `json:"snapshot,omitempty"`
-	ID       string         `json:"id,omitempty"`
-	ServerID string         `json:"server_id,omitempty"`
+	Type      string         `json:"type"`
+	Auth      *bool          `json:"auth,omitempty"`
+	ClientID  string         `json:"client_id,omitempty"`
+	Snapshot  *wireSnapshot  `json:"snapshot,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	ServerID  string         `json:"server_id,omitempty"`
 	EntityID string         `json:"entity_id,omitempty"`
 	Command  string         `json:"command,omitempty"`
 	Params   map[string]any `json:"params,omitempty"`
@@ -54,6 +55,11 @@ type wireEntity struct {
 	Attributes map[string]any `json:"attributes"`
 }
 
+// Broadcaster defines the interface for sending messages to connected HA clients.
+type Broadcaster interface {
+	Broadcast(msg wireMessage)
+}
+
 // --- haServer ---
 
 type haServer struct {
@@ -75,6 +81,19 @@ type haServer struct {
 	// testEntities is an optional in-memory entity map used in tests when no
 	// real storage is wired up. Keyed by entity_id (e.g. "light.testlight").
 	testEntities map[string]domain.Entity
+
+	// mockBroadcaster is used in tests to intercept outgoing messages.
+	mockBroadcaster Broadcaster
+
+	trustedClientID string
+}
+
+type pairingKey struct{}
+
+func (pairingKey) Key() string { return "plugin-homeassistant.pairing" }
+
+type pairingRecord struct {
+	TrustedClientID string `json:"trusted_client_id"`
 }
 
 func newServer(cfg Config, store storage.Storage, cmds *messenger.Commands) *haServer {
@@ -179,7 +198,12 @@ func (s *haServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Respond with hello + auth
-	authOK := true
+	authOK := s.authorizeClientID(hello.ClientID, r.RemoteAddr)
+	if !authOK {
+		_ = conn.WriteJSON(wireMessage{Type: "hello", Auth: &authOK, ServerID: s.instanceID})
+		return
+	}
+
 	if err := conn.WriteJSON(wireMessage{Type: "hello", Auth: &authOK, ServerID: s.instanceID}); err != nil {
 		log.Printf("plugin-homeassistant: write hello: %v", err)
 		return
@@ -220,6 +244,77 @@ func (s *haServer) handleWS(w http.ResponseWriter, r *http.Request) {
 			log.Printf("plugin-homeassistant: unknown message type %q", msg.Type)
 		}
 	}
+}
+
+func (s *haServer) authorizeClientID(clientID, remoteAddr string) bool {
+	if clientID == "" {
+		log.Printf("plugin-homeassistant: missing client_id from %s", remoteAddr)
+		return false
+	}
+
+	trustedClientID, err := s.getTrustedClientID()
+	if err != nil {
+		log.Printf("plugin-homeassistant: load pairing state: %v", err)
+		return false
+	}
+	if trustedClientID == "" {
+		if err := s.setTrustedClientID(clientID); err != nil {
+			log.Printf("plugin-homeassistant: store pairing state: %v", err)
+			return false
+		}
+		log.Printf("plugin-homeassistant: pairing established for client_id=%s", clientID)
+		return true
+	}
+	if trustedClientID != clientID {
+		log.Printf("plugin-homeassistant: pairing rejected for client_id=%s", clientID)
+		log.Printf("plugin-homeassistant: client_id mismatch from %s", remoteAddr)
+		return false
+	}
+	return true
+}
+
+func (s *haServer) getTrustedClientID() (string, error) {
+	s.mu.RLock()
+	trustedClientID := s.trustedClientID
+	s.mu.RUnlock()
+	if trustedClientID != "" {
+		return trustedClientID, nil
+	}
+	if s.store == nil {
+		return "", nil
+	}
+
+	data, err := s.store.GetInternal(pairingKey{})
+	if err != nil {
+		return "", nil
+	}
+	var record pairingRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return "", fmt.Errorf("parse pairing state: %w", err)
+	}
+
+	s.mu.Lock()
+	s.trustedClientID = record.TrustedClientID
+	s.mu.Unlock()
+	return record.TrustedClientID, nil
+}
+
+func (s *haServer) setTrustedClientID(clientID string) error {
+	s.mu.Lock()
+	s.trustedClientID = clientID
+	s.mu.Unlock()
+	if s.store == nil {
+		return nil
+	}
+
+	body, err := json.Marshal(pairingRecord{TrustedClientID: clientID})
+	if err != nil {
+		return fmt.Errorf("marshal pairing state: %w", err)
+	}
+	if err := s.store.SetInternal(pairingKey{}, body); err != nil {
+		return fmt.Errorf("persist pairing state: %w", err)
+	}
+	return nil
 }
 
 // handleInboundCommand processes a command arriving from HA via WebSocket.
@@ -300,6 +395,11 @@ func (s *haServer) findEntityByWireID(entityID string) (domain.Entity, error) {
 
 // Broadcast sends a message to all connected HA clients.
 func (s *haServer) Broadcast(msg wireMessage) {
+	if s.mockBroadcaster != nil {
+		s.mockBroadcaster.Broadcast(msg)
+		return
+	}
+
 	s.mu.RLock()
 	clients := make([]*websocket.Conn, len(s.clients))
 	copy(clients, s.clients)

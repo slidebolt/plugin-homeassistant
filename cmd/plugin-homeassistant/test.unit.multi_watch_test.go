@@ -139,11 +139,14 @@ func (m *multiEnv) connectWS(t *testing.T) *wsCollector {
 	}
 
 	// Hello handshake
-	conn.WriteJSON(map[string]string{"type": "hello"})
+	conn.WriteJSON(map[string]string{"type": "hello", "client_id": "test-ha-client"})
 	var hello map[string]any
 	conn.ReadJSON(&hello)
 	if hello["type"] != "hello" {
 		t.Fatalf("expected hello, got %v", hello)
+	}
+	if auth, ok := hello["auth"].(bool); !ok || !auth {
+		t.Fatalf("expected authorized hello, got %v", hello)
 	}
 
 	// Read snapshot (discard)

@@ -13,22 +13,23 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/grandcat/zeroconf"
+	translate "github.com/slidebolt/plugin-homeassistant/internal/translate"
 	domain "github.com/slidebolt/sb-domain"
 	messenger "github.com/slidebolt/sb-messenger-sdk"
-	translate "github.com/slidebolt/plugin-homeassistant/internal/translate"
 	storage "github.com/slidebolt/sb-storage-sdk"
 )
 
 // --- Wire types (mirror the mock server protocol exactly) ---
 
 type wireMessage struct {
-	Type      string         `json:"type"`
-	Auth      *bool          `json:"auth,omitempty"`
-	ClientID  string         `json:"client_id,omitempty"`
-	Snapshot  *wireSnapshot  `json:"snapshot,omitempty"`
-	ID        string         `json:"id,omitempty"`
-	ServerID  string         `json:"server_id,omitempty"`
+	Type     string         `json:"type"`
+	Auth     *bool          `json:"auth,omitempty"`
+	ClientID string         `json:"client_id,omitempty"`
+	Snapshot *wireSnapshot  `json:"snapshot,omitempty"`
+	ID       string         `json:"id,omitempty"`
+	ServerID string         `json:"server_id,omitempty"`
 	EntityID string         `json:"entity_id,omitempty"`
+	UniqueID string         `json:"unique_id,omitempty"`
 	Command  string         `json:"command,omitempty"`
 	Params   map[string]any `json:"params,omitempty"`
 	Success  *bool          `json:"success,omitempty"`
@@ -200,9 +201,11 @@ func (s *haServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	// 2. Respond with hello + auth
 	authOK := s.authorizeClientID(hello.ClientID, r.RemoteAddr)
 	if !authOK {
+		log.Printf("plugin-homeassistant: auth rejected remote=%s client_id=%s", r.RemoteAddr, hello.ClientID)
 		_ = conn.WriteJSON(wireMessage{Type: "hello", Auth: &authOK, ServerID: s.instanceID})
 		return
 	}
+	log.Printf("plugin-homeassistant: auth ok remote=%s client_id=%s", r.RemoteAddr, hello.ClientID)
 
 	if err := conn.WriteJSON(wireMessage{Type: "hello", Auth: &authOK, ServerID: s.instanceID}); err != nil {
 		log.Printf("plugin-homeassistant: write hello: %v", err)
@@ -220,10 +223,14 @@ func (s *haServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total := 0
+	entityIDs := make([]string, 0)
 	for _, d := range snap.Devices {
 		total += len(d.Entities)
+		for _, e := range d.Entities {
+			entityIDs = append(entityIDs, e.EntityID)
+		}
 	}
-	log.Printf("plugin-homeassistant: snapshot sent (%d entities)", total)
+	log.Printf("plugin-homeassistant: snapshot sent devices=%d entities=%d entity_ids=%v", len(snap.Devices), total, entityIDs)
 
 	if s.onSnapshotSent != nil {
 		s.onSnapshotSent()
@@ -321,6 +328,7 @@ func (s *haServer) setTrustedClientID(clientID string) error {
 // It routes the command to the entity's owning plugin via messenger, or
 // applies it locally if the entity belongs to this plugin (or in test mode).
 func (s *haServer) handleInboundCommand(conn *websocket.Conn, msg wireMessage) {
+	log.Printf("plugin-homeassistant: command recv id=%s entity_id=%s command=%s params=%v", msg.ID, msg.EntityID, msg.Command, msg.Params)
 	entity, err := s.findEntityByWireID(msg.EntityID)
 	if err != nil {
 		log.Printf("plugin-homeassistant: entity not found for %q: %v", msg.EntityID, err)
@@ -330,6 +338,7 @@ func (s *haServer) handleInboundCommand(conn *websocket.Conn, msg wireMessage) {
 	}
 
 	entityType := entity.Type
+	log.Printf("plugin-homeassistant: command resolved entity_id=%s key=%s name=%q type=%s", msg.EntityID, entity.Key(), entity.Name, entity.Type)
 
 	cmd, err := translate.FromHA(entityType, msg.Command, msg.Params)
 	if err != nil {
@@ -338,6 +347,7 @@ func (s *haServer) handleInboundCommand(conn *websocket.Conn, msg wireMessage) {
 		conn.WriteJSON(wireMessage{Type: "command_result", ID: msg.ID, EntityID: msg.EntityID, Success: &fail}) //nolint:errcheck
 		return
 	}
+	log.Printf("plugin-homeassistant: command translated entity_id=%s key=%s command=%T", msg.EntityID, entity.Key(), cmd)
 
 	if s.testEntities != nil {
 		// Test mode: apply locally and broadcast.
@@ -359,6 +369,9 @@ func (s *haServer) handleInboundCommand(conn *websocket.Conn, msg wireMessage) {
 			conn.WriteJSON(wireMessage{Type: "command_result", ID: msg.ID, EntityID: msg.EntityID, Success: &fail}) //nolint:errcheck
 			return
 		}
+		log.Printf("plugin-homeassistant: route command ok target=%s command=%T", target.Key(), actionCmd)
+	} else {
+		log.Printf("plugin-homeassistant: command not routable entity_id=%s key=%s command=%T cmds_available=%t", msg.EntityID, entity.Key(), cmd, s.cmds != nil)
 	}
 
 	success := true
@@ -516,11 +529,17 @@ func slugify(s string) string {
 	return strings.Trim(out, "_")
 }
 
-// WireID returns the HA entity_id for a domain entity, e.g.
-// "light.plugin_kasa_living_room_lamp1". The object_id portion is the
-// slugified entity key so it is globally unique across plugins.
+// WireID returns the desired HA entity_id for a domain entity. User-owned
+// profile IDs win so HA names survive plugin rediscovery and migrations.
 func WireID(entity domain.Entity) string {
-	return haPlatform(entity.Type) + "." + slugify(entity.Key())
+	objectID := ""
+	if entity.Profile != nil {
+		objectID = strings.TrimSpace(entity.Profile.ID)
+	}
+	if objectID == "" {
+		objectID = entity.Key()
+	}
+	return haPlatform(entity.Type) + "." + slugify(objectID)
 }
 
 // entityToWire converts a domain.Entity to the HA wire format.
@@ -531,11 +550,18 @@ func entityToWire(entity domain.Entity) wireEntity {
 		UniqueID:   entity.Key(),
 		EntityID:   WireID(entity),
 		Platform:   platform,
-		Name:       entity.Name,
+		Name:       displayName(entity),
 		Available:  true,
 		State:      stateMap,
 		Attributes: attrs,
 	}
+}
+
+func displayName(entity domain.Entity) string {
+	if entity.Profile != nil && strings.TrimSpace(entity.Profile.Name) != "" {
+		return strings.TrimSpace(entity.Profile.Name)
+	}
+	return entity.Name
 }
 
 // outboundInterface returns the network interface used for the default route

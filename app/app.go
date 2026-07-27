@@ -112,7 +112,7 @@ func (a *App) OnStart(deps map[string]json.RawMessage) (json.RawMessage, error) 
 				return
 			}
 			we := entityToWire(entity)
-			a.srv.Broadcast(wireMessage{Type: "entity_removed", Entity: &we})
+			a.srv.Broadcast(wireMessage{Type: "entity_removed", UniqueID: we.UniqueID, EntityID: we.EntityID, Entity: &we})
 			log.Printf("plugin-homeassistant: entity removed %s", key)
 		},
 		OnCapabilityUpdate: func(key string, data json.RawMessage) {

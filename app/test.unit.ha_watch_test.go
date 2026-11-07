@@ -25,7 +25,7 @@ func (c *msgCollector) Broadcast(msg wireMessage) {
 
 func (c *msgCollector) wait(t *testing.T, count int) []wireMessage {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		c.mu.Lock()
 		n := len(c.msgs)

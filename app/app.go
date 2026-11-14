@@ -38,6 +38,7 @@ func (a *App) Hello() contract.HelloResponse {
 		ID:              PluginID,
 		Kind:            contract.KindPlugin,
 		ContractVersion: contract.ContractVersion,
+		Definitions:     contract.DescribePlugin("Home Assistant", "Bridges shared domain state to and from Home Assistant without defining presentation-specific contracts."),
 		DependsOn:       []string{"messenger", "storage"},
 	}
 }

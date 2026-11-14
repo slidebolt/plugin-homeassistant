@@ -40,6 +40,11 @@ func (a *App) Hello() contract.HelloResponse {
 		ContractVersion: contract.ContractVersion,
 		Definitions:     contract.DescribePlugin("Home Assistant", "Bridges shared domain state to and from Home Assistant without defining presentation-specific contracts."),
 		DependsOn:       []string{"messenger", "storage"},
+		Setup: contract.SelectableSetup("Bridges",
+			contract.SetupField{Key: "system_uuid", Environment: "SYSTEM_UUID", Name: "Bridge UUID", Description: "Stable generated identity used for bridge discovery.", Control: contract.SetupText, Required: true, Generate: "uuid"},
+			contract.SetupField{Key: "system_mac", Environment: "SYSTEM_MAC", Name: "Bridge MAC", Description: "Stable generated locally administered network identity.", Control: contract.SetupText, Required: true, Generate: "local_mac"},
+			contract.SetupField{Key: "port", Environment: "HA_PORT", Name: "Bridge port", Description: "Local bridge listener port.", Control: contract.SetupText, Format: "integer", Advanced: true, Generate: "free_port"},
+		),
 	}
 }
 
